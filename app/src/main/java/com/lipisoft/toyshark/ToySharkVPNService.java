@@ -15,11 +15,18 @@
 */
 package com.lipisoft.toyshark;
 
+import static android.system.OsConstants.IPPROTO_TCP;
+
+import android.annotation.SuppressLint;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.net.ConnectivityManager;
 import android.net.VpnService;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Message;
 import android.os.ParcelFileDescriptor;
@@ -27,6 +34,11 @@ import android.os.SystemClock;
 import android.util.Log;
 import android.widget.Toast;
 
+import androidx.collection.ArraySet;
+
+import com.lipisoft.toyshark.ConnectionAnalysis.Collector;
+import com.lipisoft.toyshark.ConnectionAnalysis.Detector;
+import com.lipisoft.toyshark.ConnectionAnalysis.Report;
 import com.lipisoft.toyshark.packetRebuild.PCapFileWriter;
 import com.lipisoft.toyshark.socket.IProtectSocket;
 import com.lipisoft.toyshark.socket.IReceivePacket;
@@ -34,15 +46,27 @@ import com.lipisoft.toyshark.socket.SocketDataPublisher;
 import com.lipisoft.toyshark.socket.SocketNIODataService;
 import com.lipisoft.toyshark.socket.SocketProtector;
 import com.lipisoft.toyshark.transport.tcp.PacketHeaderException;
+import com.lipisoft.toyshark.util.PacketUtil;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.net.DatagramSocket;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Timer;
+import java.util.TimerTask;
 
 public class ToySharkVPNService extends VpnService implements Handler.Callback,
 		Runnable, IProtectSocket, IReceivePacket{
@@ -60,6 +84,7 @@ public class ToySharkVPNService extends VpnService implements Handler.Callback,
 	private File traceDir;
 	private PCapFileWriter pcapOutput;
 	private FileOutputStream timeStream;
+
 
 	@Override
 	public int onStartCommand(Intent intent, int flags, int startId) {
@@ -98,11 +123,30 @@ public class ToySharkVPNService extends VpnService implements Handler.Callback,
 			}
 		}
 
+		new Timer().scheduleAtFixedRate(new TimerTask() {
+			@Override
+			public void run() {
+				//your methods
+				Map<String, Session> table = SessionManager.INSTANCE.getTable();
+				for(Map.Entry<String, Session> entry: table.entrySet()) {
+
+					String mapKey = entry.getKey();
+					Session session = entry.getValue();
+					Log.e("TAGDEBUG", "run: " + mapKey + " " + session.isConnected());
+					Log.e("TAGDEBUG", "run2: UID: " + session.getUid() + " -> " + getApplicationContext().getPackageManager().getNameForUid(session.getUid()) + " received:" + session.getPacketsReceived() + " sent:" + session.getPacketsSent() );
+				}
+
+
+			}
+		}, 0, 10000);//put here time 1000 milliseconds=1 second
+
+
 		// Start a new session by creating a new thread.
 		mThread = new Thread(this, "CaptureThread");
 		mThread.start();
 		return START_STICKY;
 	}
+
 
 	private void loadExtras(Intent intent) {
 		String traceDirStr = intent.getStringExtra("TRACE_DIR");
@@ -359,6 +403,48 @@ public class ToySharkVPNService extends VpnService implements Handler.Callback,
 		}
 	}
 
+	private ArrayList<AppDescriptor> asyncLoadAppsInfo() {
+		Context mContext = getApplicationContext();
+		final PackageManager pm = mContext.getPackageManager();
+		ArrayList<AppDescriptor> apps = new ArrayList<>();
+		ArraySet<Integer> uids = new ArraySet<>();
+
+		Log.d(TAG, "Loading APPs...");
+		@SuppressLint("QueryPermissionsNeeded") List<PackageInfo> packs = pm.getInstalledPackages(0);
+		String app_package = mContext.getApplicationContext().getPackageName();
+
+		Log.d(TAG, "num apps (system+user): " + packs.size());
+		long tstart = getNow();
+
+		// NOTE: a single uid can correspond to multiple packages, only take the first package found.
+		// The VPNService in android works with UID, so this choice is not restrictive.
+		for (int i = 0; i < packs.size(); i++) {
+			PackageInfo p = packs.get(i);
+			String package_name = p.applicationInfo.packageName;
+
+			if(!uids.contains(p.applicationInfo.uid) && !package_name.equals(app_package)) {
+				int uid = p.applicationInfo.uid;
+				AppDescriptor app = new AppDescriptor(pm, p);
+
+				apps.add(app);
+				uids.add(uid);
+
+				//Log.d(TAG, appName + " - " + package_name + " [" + uid + "]" + (is_system ? " - SYS" : " - USR"));
+			}
+		}
+
+		Collections.sort(apps);
+
+		Log.d(TAG, packs.size() + " apps loaded in " + (getNow() - tstart) +" seconds");
+		return apps;
+	}
+
+	public long getNow() {
+		Calendar calendar = Calendar.getInstance();
+		return(calendar.getTimeInMillis() / 1000);
+	}
+
+
 	/**
 	 * setup VPN interface.
 	 * @return boolean
@@ -373,10 +459,48 @@ public class ToySharkVPNService extends VpnService implements Handler.Callback,
 
 		Log.i(TAG, "startVpnService => create builder");
 		// Configure a builder while parsing the parameters.
+		/* In order to see the DNS packets into the VPN we must set an internal address as the DNS
+		 * server. */
 		Builder builder = new Builder()
 				.addAddress("10.120.0.1", 32)
 				.addRoute("0.0.0.0", 0)
-				.setSession("ToyShark");
+				.setSession("QuickTestVpn")
+				.addDnsServer("10.120.0.2")
+				.addDnsServer("8.8.8.8")
+//				.addDnsServer("8.8.4.4")
+				;
+
+		ArrayList<AppDescriptor> appDescriptors = asyncLoadAppsInfo();
+
+		Log.e("TAGDEBUG", "startVpnService: " + appDescriptors.size() );
+		for (AppDescriptor appDescriptor : appDescriptors) {
+
+			if(!appDescriptor.getPackageName().equals("com.securitycoverage.filehopper")) {
+				try {
+					builder.addDisallowedApplication(appDescriptor.getPackageName());
+				} catch (PackageManager.NameNotFoundException e) {
+					e.printStackTrace();
+				}
+			}
+
+		}
+
+		try {
+			builder.addDisallowedApplication(getPackageName());
+		} catch (PackageManager.NameNotFoundException ex) {
+			Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+		}
+
+//		try {
+//			// NOTE: the API requires a package name, however it is converted to a UID
+//			// (see Vpn.java addUserToRanges). This means that vpn routing happens on a UID basis,
+//			// not on a package-name basis!
+//			if (MainActivity.TEST_APP != null && !MainActivity.TEST_APP.isEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+//				builder.addAllowedApplication(MainActivity.TEST_APP);
+//			}
+//		} catch (PackageManager.NameNotFoundException e) {
+//			e.printStackTrace();
+//		}
 		mInterface = builder.establish();
 
 		if(mInterface != null){
@@ -407,6 +531,7 @@ public class ToySharkVPNService extends VpnService implements Handler.Callback,
 		IClientPacketWriter clientPacketWriter = new ClientPacketWriterImpl(clientWriter);
 
 		SessionHandler handler = SessionHandler.getInstance();
+		handler.setContext(getApplicationContext());
 		handler.setWriter(clientPacketWriter);
 
 		//background task for non-blocking socket
@@ -428,7 +553,7 @@ public class ToySharkVPNService extends VpnService implements Handler.Callback,
 			data = packet.array();
 			length = clientReader.read(data);
 			if (length > 0) {
-				//Log.d(TAG, "received packet from vpn client: "+length);
+				Log.d(TAG, "received packet from vpn client: "+length);
 				try {
 					packet.limit(length);
 

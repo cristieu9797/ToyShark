@@ -16,7 +16,9 @@
 package com.lipisoft.toyshark;
 
 import android.Manifest;
+import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -27,26 +29,49 @@ import android.net.VpnService;
 import android.os.Bundle;
 import android.os.Environment;
 import androidx.annotation.NonNull;
+import androidx.appcompat.widget.SearchView;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.DividerItemDecoration;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
-import android.util.Log;
 
+import android.os.Process;
+import android.util.Log;
+import android.view.View;
+import android.widget.Button;
+import android.widget.TextView;
+
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-public class MainActivity extends AppCompatActivity {
+
+import static android.system.OsConstants.IPPROTO_TCP;
+
+public class MainActivity extends AppCompatActivity implements AppsLoadListener {
 	private static String TAG = "MainActivity";
 	private static final int REQUEST_WRITE_EXTERNAL_STORAGE = 0;
+	private Button btnStartVpn, btnChooseApp;
+	AppsListView mOpenAppsList;
+	private TextView mEmptyAppsView;
+	public static String TEST_APP = "com.securitycoverage.filehopper";
+
+
+
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.packet_list);
+
+		btnStartVpn = findViewById(R.id.btn_start_vpn);
+		btnChooseApp = findViewById(R.id.btn_choose_app);
 
 		final RecyclerView recyclerView = findViewById(R.id.packet_list_recycler_view);
 		recyclerView.addItemDecoration(new DividerItemDecoration(this, DividerItemDecoration.VERTICAL));
@@ -56,7 +81,87 @@ public class MainActivity extends AppCompatActivity {
 		PacketManager.INSTANCE.setAdapter(adapter);
 		recyclerView.setAdapter(adapter);
 
-		checkRuntimePermission();
+		final RecyclerView recyclerViewConnections = findViewById(R.id.connections_recycler_view);
+		recyclerViewConnections.setHasFixedSize(true);
+		recyclerViewConnections.setLayoutManager(new LinearLayoutManager(this));
+
+		// create a deep copy I believe of an empty list, seems useless
+
+		final ConnectionListAdapter adapterConnections = new ConnectionListAdapter(SessionManager.INSTANCE.getList());
+		SessionManager.INSTANCE.setAdapter(adapterConnections);
+		recyclerViewConnections.setAdapter(adapterConnections);
+
+		btnStartVpn.setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View view) {
+				checkRuntimePermission();
+			}
+		});
+
+		btnChooseApp.setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View view) {
+				openAppFilterSelector();
+			}
+		});
+
+	}
+
+	private void openAppFilterSelector() {
+		Dialog dialog = getAppSelectionDialog(this, new ArrayList<>(), this::setAppFilter);
+		dialog.setOnCancelListener(dialog1 -> {
+			setAppFilter(null);
+		});
+		dialog.setOnDismissListener(dialog1 -> {
+			mOpenAppsList = null;
+			mEmptyAppsView = null;
+		});
+
+		dialog.show();
+
+		// NOTE: run this after dialog.show
+		mOpenAppsList = (AppsListView) dialog.findViewById(R.id.apps_list);
+		mEmptyAppsView = dialog.findViewById(R.id.no_apps);
+		mEmptyAppsView.setText("Loading apps...");
+
+		(new AppsLoader(this))
+				.setAppsLoadListener(this)
+				.loadAllApps();
+	}
+
+	private void setAppFilter(AppDescriptor filter){
+		if(filter != null) {
+			Log.e("TAGDEBUG", "setAppFilter: " + filter.getPackageName() + " " + filter.getUid());
+//			TEST_APP = String.valueOf(filter.getUid());
+			TEST_APP = filter.getPackageName();
+		}
+	}
+
+	public Dialog getAppSelectionDialog(Activity activity, List<AppDescriptor> appsData, AppsListView.OnSelectedAppListener listener) {
+		View dialogLayout = activity.getLayoutInflater().inflate(R.layout.apps_selector, null);
+		SearchView searchView = dialogLayout.findViewById(R.id.apps_search);
+		AppsListView apps = dialogLayout.findViewById(R.id.apps_list);
+		TextView emptyText = dialogLayout.findViewById(R.id.no_apps);
+
+		apps.setApps(appsData);
+		apps.setEmptyView(emptyText);
+		searchView.setOnQueryTextListener(apps);
+
+		androidx.appcompat.app.AlertDialog.Builder builder = new androidx.appcompat.app.AlertDialog.Builder(activity);
+		builder.setTitle("Filtru apps");
+		builder.setView(dialogLayout);
+
+		final androidx.appcompat.app.AlertDialog alert = builder.create();
+		alert.setCanceledOnTouchOutside(true);
+
+		apps.setSelectedAppListener(app -> {
+			listener.onSelectedApp(app);
+
+			// dismiss the dialog
+			alert.dismiss();
+		});
+
+		return alert;
 	}
 
 	void checkRuntimePermission() {
@@ -73,9 +178,10 @@ public class MainActivity extends AppCompatActivity {
 						REQUEST_WRITE_EXTERNAL_STORAGE);
 			}
 		} else {
-			if (networkAndAirplaneModeCheck())
+			if (networkAndAirplaneModeCheck()){
+				btnStartVpn.setEnabled(false);
 				startVPN();
-			else {
+			} else {
 				showInfoDialog(getResources().getString(R.string.app_name),
 						getResources().getString(R.string.no_network_information));
 			}
@@ -143,7 +249,9 @@ public class MainActivity extends AppCompatActivity {
 		Log.i(TAG, "onActivityResult(resultCode:  " + resultCode + ")");
 		if (resultCode == RESULT_OK) {
 			Intent captureVpnServiceIntent = new Intent(getApplicationContext(), ToySharkVPNService.class);
-			captureVpnServiceIntent.putExtra("TRACE_DIR", Environment.getExternalStorageDirectory().getPath() + "/ToyShark");
+//			captureVpnServiceIntent.putExtra("TRACE_DIR", Environment.getExternalStorageDirectory().getPath() + "/ToyShark");
+			captureVpnServiceIntent.putExtra("TRACE_DIR", Environment
+					.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) + "/ToyShark");
 			startService(captureVpnServiceIntent);
 		} else if (resultCode == RESULT_CANCELED) {
 			showVPNRefusedDialog();
@@ -243,5 +351,17 @@ public class MainActivity extends AppCompatActivity {
 //		}
 //		return true;
 		return isConnectedToInternet();
+	}
+
+	@Override
+	public void onAppsInfoLoaded(List<AppDescriptor> installedApps) {
+		if(mOpenAppsList == null)
+			return;
+
+		mEmptyAppsView.setText("no apps found");
+
+		// Load the apps/icons
+		Log.d(TAG, "loading " + installedApps.size() +" apps in dialog, icons=" + installedApps);
+		mOpenAppsList.setApps(installedApps);
 	}
 }

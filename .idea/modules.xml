@@ -2,8 +2,11 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/ToyShark.iml" filepath="$PROJECT_DIR$/ToyShark.iml" />
-      <module fileurl="file://$PROJECT_DIR$/app/app.iml" filepath="$PROJECT_DIR$/app/app.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/ToyShark.iml" filepath="$PROJECT_DIR$/.idea/modules/ToyShark.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/app/ToyShark.app.iml" filepath="$PROJECT_DIR$/.idea/modules/app/ToyShark.app.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/app/ToyShark.app.androidTest.iml" filepath="$PROJECT_DIR$/.idea/modules/app/ToyShark.app.androidTest.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/app/ToyShark.app.main.iml" filepath="$PROJECT_DIR$/.idea/modules/app/ToyShark.app.main.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/app/ToyShark.app.unitTest.iml" filepath="$PROJECT_DIR$/.idea/modules/app/ToyShark.app.unitTest.iml" />
     </modules>
   </component>
 </project>

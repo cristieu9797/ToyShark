@@ -18,6 +18,9 @@ package com.lipisoft.toyshark.transport.tcp;
 import androidx.annotation.Nullable;
 
 import com.lipisoft.toyshark.transport.ITransportHeader;
+
+import java.util.Arrays;
+
 /**
  * data structure for TCP Header
  * @author Borey Sao
@@ -268,5 +271,34 @@ public class TCPHeader implements ITransportHeader{
 	void setTimeStampReplyTo(int timeStampReplyTo) {
 		this.timeStampReplyTo = timeStampReplyTo;
 	}
-	
+
+	@Override
+	public String toString() {
+		return "TCPHeader{" +
+				"sourcePort=" + sourcePort +
+				", destinationPort=" + destinationPort +
+				", sequenceNumber=" + sequenceNumber +
+				", dataOffset=" + dataOffset +
+				", tcpFlags=" + tcpFlags +
+				", isNs=" + isNs +
+				", isCwr=" + isCwr +
+				", isece=" + isece +
+				", issyn=" + issyn +
+				", isack=" + isack +
+				", isfin=" + isfin +
+				", isrst=" + isrst +
+				", ispsh=" + ispsh +
+				", isurg=" + isurg +
+				", windowSize=" + windowSize +
+				", checksum=" + checksum +
+				", urgentPointer=" + urgentPointer +
+				", options=" + Arrays.toString(options) +
+				", ackNumber=" + ackNumber +
+				", maxSegmentSize=" + maxSegmentSize +
+				", windowScale=" + windowScale +
+				", isSelectiveAckPermitted=" + isSelectiveAckPermitted +
+				", timeStampSender=" + timeStampSender +
+				", timeStampReplyTo=" + timeStampReplyTo +
+				'}';
+	}
 }

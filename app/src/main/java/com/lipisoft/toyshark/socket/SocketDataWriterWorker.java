@@ -10,11 +10,15 @@ import com.lipisoft.toyshark.transport.tcp.TCPPacketFactory;
 import com.lipisoft.toyshark.util.PacketUtil;
 
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.URLDecoder;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
 import java.nio.channels.NotYetConnectedException;
 import java.nio.channels.SocketChannel;
 import java.nio.channels.spi.AbstractSelectableChannel;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Date;
 
 public class SocketDataWriterWorker implements Runnable {
@@ -75,6 +79,7 @@ public class SocketDataWriterWorker implements Runnable {
 		}
 	}
 
+
 	private void writeUDP(Session session){
 		if(!session.hasDataToSend()){
 			return;
@@ -95,6 +100,7 @@ public class SocketDataWriterWorker implements Runnable {
 			channel.write(buffer);
 			Date dt = new Date();
 			session.connectionStartTime = dt.getTime();
+			session.setPacketsSent(session.getPacketsSent() + 1);
 		}catch(NotYetConnectedException ex2){
 			session.setAbortingConnection(true);
 			Log.e(TAG,"Error writing to unconnected-UDP server, will abort current connection: "+ex2.getMessage());
@@ -103,6 +109,10 @@ public class SocketDataWriterWorker implements Runnable {
 			e.printStackTrace();
 			Log.e(TAG,"Error writing to UDP server, will abort connection: "+e.getMessage());
 		}
+	}
+
+	private String decode(String value) throws UnsupportedEncodingException {
+		return URLDecoder.decode(value, StandardCharsets.UTF_8.toString());
 	}
 	
 	private void writeTCP(Session session){
@@ -117,8 +127,11 @@ public class SocketDataWriterWorker implements Runnable {
 		buffer.flip();
 		
 		try {
-			Log.d(TAG,"writing TCP data to: " + name);
+			Log.d(TAG,"writing TCP data to: " + name + " length= " + data.length);
 			channel.write(buffer);
+			Log.e("TAGDEBUG", "writeTCP: sent: " + session.getPacketsSent() );
+			session.setPacketsSent(session.getPacketsSent() + 1);
+
 			//Log.d(TAG,"finished writing data to: "+name);
 		} catch (NotYetConnectedException ex) {
 			Log.e(TAG,"failed to write to unconnected socket: " + ex.getMessage());

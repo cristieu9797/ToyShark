@@ -44,7 +44,13 @@ public class Session {
 	
 	private int sourceIp = 0;
 	private int sourcePort = 0;
-	
+
+	private int uid = 0;
+	private int dataSentLength = 0;
+	private int dataReceivedLength = 0;
+	private int packetsReceived = 0;
+	private int packetsSent = 0;
+
 	//sequence received from client
 	private long recSequence = 0;
 	
@@ -121,6 +127,16 @@ public class Session {
 		this.sourcePort = sourcePort;
 		this.destIp = destinationIp;
 		this.destPort = destinationPort;
+	}
+
+	Session(int sourceIp, int sourcePort, int destinationIp, int destinationPort, int uid){
+		receivingStream = new ByteArrayOutputStream();
+		sendingStream = new ByteArrayOutputStream();
+		this.sourceIp = sourceIp;
+		this.sourcePort = sourcePort;
+		this.destIp = destinationIp;
+		this.destPort = destinationPort;
+		this.uid = uid;
 	}
 
 	/*
@@ -295,7 +311,43 @@ public class Session {
 		return sourcePort;
 	}
 
-//	public int getSendWindowSize() {
+	public int getUid() {
+		return uid;
+	}
+
+	public int getDataSentLength() {
+		return dataSentLength;
+	}
+
+	public int getDataReceivedLength() {
+		return dataReceivedLength;
+	}
+
+	public void setDataSentLength(int dataSentLength) {
+		this.dataSentLength = dataSentLength;
+	}
+
+	public void setDataReceivedLength(int dataReceivedLength) {
+		this.dataReceivedLength = dataReceivedLength;
+	}
+
+	public int getPacketsReceived() {
+		return packetsReceived;
+	}
+
+	public void setPacketsReceived(int packetsReceived) {
+		this.packetsReceived = packetsReceived;
+	}
+
+	public int getPacketsSent() {
+		return packetsSent;
+	}
+
+	public void setPacketsSent(int packetsSent) {
+		this.packetsSent = packetsSent;
+	}
+
+	//	public int getSendWindowSize() {
 //		return sendWindowSize;
 //	}
 

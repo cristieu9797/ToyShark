@@ -102,6 +102,8 @@ public class SocketNIODataService implements Runnable {
 	}
 
 	private void processUDPSelectionKey(SelectionKey key){
+		Log.e("TAGDEBUG", "processUDPSelectionKey: " );
+
 		if(!key.isValid()){
 			Log.d(TAG,"Invalid SelectionKey for UDP");
 			return;
@@ -132,6 +134,7 @@ public class SocketNIODataService implements Runnable {
 	}
 
 	private void processTCPSelectionKey(SelectionKey key) throws IOException{
+		Log.e("TAGDEBUG", "processTCPSelectionKey: " );
 		if(!key.isValid()){
 			Log.d(TAG,"Invalid SelectionKey for TCP");
 			return;
