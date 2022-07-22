@@ -60,7 +60,7 @@ public class MainActivity extends AppCompatActivity implements AppsLoadListener 
 	private Button btnStartVpn, btnChooseApp;
 	AppsListView mOpenAppsList;
 	private TextView mEmptyAppsView;
-	public static String TEST_APP = "com.securitycoverage.filehopper";
+	public static String TEST_APP = "com.example.apicalltestforvpnapp";
 
 
 

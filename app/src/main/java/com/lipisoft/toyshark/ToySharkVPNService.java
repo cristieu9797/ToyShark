@@ -475,7 +475,7 @@ public class ToySharkVPNService extends VpnService implements Handler.Callback,
 		Log.e("TAGDEBUG", "startVpnService: " + appDescriptors.size() );
 		for (AppDescriptor appDescriptor : appDescriptors) {
 
-			if(!appDescriptor.getPackageName().equals("com.securitycoverage.filehopper")) {
+			if(!appDescriptor.getPackageName().equals("com.example.apicalltestforvpnapp")) {
 				try {
 					builder.addDisallowedApplication(appDescriptor.getPackageName());
 				} catch (PackageManager.NameNotFoundException e) {

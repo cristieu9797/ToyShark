@@ -264,8 +264,9 @@ public enum SessionManager {
 					if (channel.isConnected()) {
 						selectionKey = channel.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE);
 					} else {
-						selectionKey = channel.register(selector, SelectionKey.OP_CONNECT | SelectionKey.OP_READ |
-								SelectionKey.OP_WRITE);
+						selectionKey = channel.register(selector, SelectionKey.OP_CONNECT
+								| SelectionKey.OP_READ | SelectionKey.OP_WRITE
+						);
 					}
 					session.setSelectionKey(selectionKey);
 					Log.d(TAG,"Registered udp selector successfully");
@@ -346,8 +347,17 @@ public enum SessionManager {
 				selector.wakeup();
 				synchronized(SocketNIODataService.syncSelector){
 					SelectionKey selectionKey = channel.register(selector,
-							SelectionKey.OP_CONNECT | SelectionKey.OP_READ |
-									SelectionKey.OP_WRITE);
+							SelectionKey.OP_CONNECT
+									| SelectionKey.OP_READ | SelectionKey.OP_WRITE
+					);
+//					SelectionKey selectionKey;
+//					if (channel.isConnected()) {
+//						selectionKey = channel.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE);
+//					} else {
+//						selectionKey = channel.register(selector, SelectionKey.OP_CONNECT
+////								| SelectionKey.OP_READ | SelectionKey.OP_WRITE
+//						);
+//					}
 					session.setSelectionKey(selectionKey);
 					Log.d(TAG,"Registered tcp selector successfully");
 				}
