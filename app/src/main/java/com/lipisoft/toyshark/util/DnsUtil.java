@@ -168,7 +168,8 @@ public class DnsUtil {
                         System.out.println("Rd Length: " + RDLENGTH);
                     }
 
-                    DOMAINS.add(label.toString(StandardCharsets.UTF_8));
+                    String labelString = new String(label.toByteArray(), StandardCharsets.UTF_8);
+                    DOMAINS.add(labelString);
                     label.reset();
                 }
 

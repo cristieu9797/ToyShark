@@ -159,17 +159,18 @@ public class VpnServiceClass extends VpnService implements IProtectSocket {
                 .setSession("QuickTestVpn");
 
 
-        for (AppDescriptor appDescriptor : appDescriptors) {
-
-			if(!appDescriptor.getPackageName().equals("com.example.apicalltestforvpnapp")) {
-				try {
-					builder.addDisallowedApplication(appDescriptor.getPackageName());
-				} catch (PackageManager.NameNotFoundException e) {
-					e.printStackTrace();
-				}
-			}
-
-		}
+        //USEFUL FOR TESTING
+//        for (AppDescriptor appDescriptor : appDescriptors) {
+//
+//			if(!appDescriptor.getPackageName().equals("com.example.apicalltestforvpnapp")) {
+//				try {
+//					builder.addDisallowedApplication(appDescriptor.getPackageName());
+//				} catch (PackageManager.NameNotFoundException e) {
+//					e.printStackTrace();
+//				}
+//			}
+//
+//		}
 
         try {
             builder.addDisallowedApplication(getPackageName());
