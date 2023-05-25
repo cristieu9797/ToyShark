@@ -19,14 +19,17 @@ package com.lipisoft.toyshark;
 import android.util.Log;
 
 import com.lipisoft.toyshark.network.ip.IPv4Header;
+import com.lipisoft.toyshark.socket.ICloseSession;
 import com.lipisoft.toyshark.transport.tcp.TCPHeader;
 import com.lipisoft.toyshark.transport.udp.UDPHeader;
+import com.lipisoft.toyshark.util.PacketUtil;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.spi.AbstractSelectableChannel;
+import java.util.Arrays;
 
 /**
  * store information about a socket connection from a VPN client.
@@ -35,52 +38,54 @@ import java.nio.channels.spi.AbstractSelectableChannel;
  * Date: May 19, 2014
  */
 public class Session {
-	private static  final String TAG = "Session";
+	private final String TAG = "Session";
 
 	private AbstractSelectableChannel channel;
-	
-	private int destIp = 0;
-	private int destPort = 0;
-	
-	private int sourceIp = 0;
-	private int sourcePort = 0;
 
-	private int uid = 0;
-	private int dataSentLength = 0;
-	private int dataReceivedLength = 0;
-	private int packetsReceived = 0;
-	private int packetsSent = 0;
+	private final int destIp;
+	private final int destPort;
+
+	private final int sourceIp;
+	private final int sourcePort;
+
+	private int appUid;
 
 	//sequence received from client
 	private long recSequence = 0;
-	
+
 	//track ack we sent to client and waiting for ack back from client
 	private long sendUnack = 0;
 	private boolean isacked = false;//last packet was acked yet?
-	
+
 	//the next ack to send to client
 	private long sendNext = 0;
 	private int sendWindow = 0; //window = windowsize x windowscale
 	private int sendWindowSize = 0;
 	private int sendWindowScale = 0;
-	
+
+	private int bytesReceived =0;
+	private int bytesSent =0;
+
+	private int packetsReceived =0;
+	private int packetsSent =0;
+
 	//track how many byte of data has been sent since last ACK from client
 	private volatile int sendAmountSinceLastAck = 0;
-	
+
 	//sent by client during SYN inside tcp options
 	private int maxSegmentSize = 0;
-	
+
 	//indicate that 3-way handshake has been completed or not
 	private boolean isConnected = false;
-	
+
 	//receiving buffer for storing data from remote host
-	private ByteArrayOutputStream receivingStream;
-	
+	private final ByteArrayOutputStream receivingStream;
+
 	//sending buffer for storing data from vpn client to be send to destination host
-	private ByteArrayOutputStream sendingStream;
-	
+	private final ByteArrayOutputStream sendingStream;
+
 	private boolean hasReceivedLastSegment = false;
-	
+
 	//last packet received from client
 	private IPv4Header lastIpHeader;
 	private TCPHeader lastTcpHeader;
@@ -88,66 +93,51 @@ public class Session {
 
 	//true when connection is about to be close
 	private boolean closingConnection = false;
-	
+
 	//indicate data from client is ready for sending to destination
-	private boolean isDataForSendingReady = false;
-	
+	private volatile boolean isDataForSendingReady = false;
+
 	//store data for retransmission
 	private byte[] unackData = null;
-	
+
 	//in ACK packet from client, if the previous packet was corrupted, client will send flag in options field
 	private boolean packetCorrupted = false;
-	
+
 	//track how many time a packet has been retransmitted => avoid loop
 	private int resendPacketCounter = 0;
-	
+
 	private int timestampSender = 0;
 	private int timestampReplyto = 0;
-	
+
 	//indicate that vpn client has sent FIN flag and it has been acked
 	private boolean ackedToFin = false;
-	//timestamp when FIN as been acked, this is used to removed session after n minute
-//	private long ackedToFinTime = 0;
-	
-	//indicate that this session is currently being worked on by some SocketDataWorker already
-	private volatile boolean isBusyRead = false;
-	private volatile boolean isBusyWrite = false;
-	
+
 	//closing session and aborting connection, will be done by background task
 	private volatile boolean abortingConnection = false;
-	
+
 	private SelectionKey selectionkey = null;
-	
+
 	public long connectionStartTime = 0;
-	
-	Session(int sourceIp, int sourcePort, int destinationIp, int destinationPort){
+
+	private final ICloseSession sessionCloser;
+
+	Session(
+			int sourceIp,
+			int sourcePort,
+			int destinationIp,
+			int destinationPort,
+			ICloseSession sessionCloser
+	) {
 		receivingStream = new ByteArrayOutputStream();
 		sendingStream = new ByteArrayOutputStream();
+
 		this.sourceIp = sourceIp;
 		this.sourcePort = sourcePort;
 		this.destIp = destinationIp;
 		this.destPort = destinationPort;
-	}
 
-	Session(int sourceIp, int sourcePort, int destinationIp, int destinationPort, int uid){
-		receivingStream = new ByteArrayOutputStream();
-		sendingStream = new ByteArrayOutputStream();
-		this.sourceIp = sourceIp;
-		this.sourcePort = sourcePort;
-		this.destIp = destinationIp;
-		this.destPort = destinationPort;
-		this.uid = uid;
+		this.sessionCloser = sessionCloser;
 	}
-
-	/*
-	 * track how many byte sent to client since last ACK to avoid overloading
-	 * @param amount Amount
-	 */
-//	public void trackAmountSentSinceLastAck(int amount){
-//		synchronized(syncSendAmount){
-//			sendAmountSinceLastAck += amount;
-//		}
-//	}
 
 	/**
 	 * decrease value of sendAmountSinceLastAck so that client's window is not full
@@ -182,12 +172,6 @@ public class Session {
 		}
 	}
 
-//	public void resetReceivingData(){
-//		synchronized(syncReceive){
-//			receivingStream.reset();
-//		}
-//	}
-
 	/**
 	 * get all data received in the buffer and empty it.
 	 * @return byte[]
@@ -205,6 +189,14 @@ public class Session {
 		return data;
 	}
 
+	public int getAppUid() {
+		return appUid;
+	}
+
+	public void setAppUid(int appUid) {
+		this.appUid = appUid;
+	}
+
 	/**
 	 * buffer has more data for vpn client
 	 * @return boolean
@@ -213,18 +205,12 @@ public class Session {
 		return receivingStream.size() > 0;
 	}
 
-//	public int getReceivedDataSize(){
-//		synchronized(syncReceive){
-//			return receivingStream.size();
-//		}
-//	}
-
 	/**
 	 * set data to be sent to destination server
 	 * @param data Data to be sent
 	 * @return boolean Success or not
 	 */
-	synchronized int setSendingData(ByteBuffer data) {
+	public synchronized int setSendingData(ByteBuffer data) {
 		final int remaining = data.remaining();
 		sendingStream.write(data.array(), data.position(), data.remaining());
 		return remaining;
@@ -295,14 +281,6 @@ public class Session {
 		this.isConnected = isConnected;
 	}
 
-//	public ByteArrayOutputStream getReceivingStream() {
-//		return receivingStream;
-//	}
-
-//	public ByteArrayOutputStream getSendingStream() {
-//		return sendingStream;
-//	}
-
 	public int getSourceIp() {
 		return sourceIp;
 	}
@@ -310,46 +288,6 @@ public class Session {
 	public int getSourcePort() {
 		return sourcePort;
 	}
-
-	public int getUid() {
-		return uid;
-	}
-
-	public int getDataSentLength() {
-		return dataSentLength;
-	}
-
-	public int getDataReceivedLength() {
-		return dataReceivedLength;
-	}
-
-	public void setDataSentLength(int dataSentLength) {
-		this.dataSentLength = dataSentLength;
-	}
-
-	public void setDataReceivedLength(int dataReceivedLength) {
-		this.dataReceivedLength = dataReceivedLength;
-	}
-
-	public int getPacketsReceived() {
-		return packetsReceived;
-	}
-
-	public void setPacketsReceived(int packetsReceived) {
-		this.packetsReceived = packetsReceived;
-	}
-
-	public int getPacketsSent() {
-		return packetsSent;
-	}
-
-	public void setPacketsSent(int packetsSent) {
-		this.packetsSent = packetsSent;
-	}
-
-	//	public int getSendWindowSize() {
-//		return sendWindowSize;
-//	}
 
 	void setSendWindowSizeAndScale(int sendWindowSize, int sendWindowScale) {
 		this.sendWindowSize = sendWindowSize;
@@ -360,10 +298,6 @@ public class Session {
 	int getSendWindowScale() {
 		return sendWindowScale;
 	}
-
-//	public boolean isAcked() {
-//		return isacked;
-//	}
 
 	void setAcked(boolean isacked) {
 		this.isacked = isacked;
@@ -376,21 +310,6 @@ public class Session {
 	void setRecSequence(long recSequence) {
 		this.recSequence = recSequence;
 	}
-
-//	public SocketChannel getSocketChannel() {
-//		return socketchannel;
-//	}
-
-//	void setSocketChannel(SocketChannel socketchannel) {
-//		this.socketchannel = socketchannel;
-//	}
-	
-//	public DatagramChannel getUdpChannel() {
-//		return udpChannel;
-//	}
-//	public void setUdpChannel(DatagramChannel udpChannel) {
-//		this.udpChannel = udpChannel;
-//	}
 
 	public AbstractSelectableChannel getChannel() {
 		return channel;
@@ -418,7 +337,7 @@ public class Session {
 	synchronized void setLastTcpHeader(TCPHeader lastTcpHeader) {
 		this.lastTcpHeader = lastTcpHeader;
 	}
-	
+
 	public synchronized UDPHeader getLastUdpHeader() {
 		return lastUdpHeader;
 	}
@@ -434,25 +353,16 @@ public class Session {
 	public boolean isDataForSendingReady() {
 		return isDataForSendingReady;
 	}
-	void setDataForSendingReady(boolean isDataForSendingReady) {
+	public void setDataForSendingReady(boolean isDataForSendingReady) {
 		this.isDataForSendingReady = isDataForSendingReady;
 	}
-//	public byte[] getUnackData() {
-//		return unackData;
-//	}
 	public void setUnackData(byte[] unackData) {
 		this.unackData = unackData;
 	}
-	
-//	public boolean isPacketCorrupted() {
-//		return packetCorrupted;
-//	}
+
 	void setPacketCorrupted(boolean packetCorrupted) {
 		this.packetCorrupted = packetCorrupted;
 	}
-//	public int getResendPacketCounter() {
-//		return resendPacketCounter;
-//	}
 	public void setResendPacketCounter(int resendPacketCounter) {
 		this.resendPacketCounter = resendPacketCounter;
 	}
@@ -471,28 +381,7 @@ public class Session {
 	boolean isAckedToFin() {
 		return ackedToFin;
 	}
-//	public void setAckedToFin(boolean ackedToFin) {
-//		this.ackedToFin = ackedToFin;
-//	}
-//	public long getAckedToFinTime() {
-//		return ackedToFinTime;
-//	}
-//	public void setAckedToFinTime(long ackedToFinTime) {
-//		this.ackedToFinTime = ackedToFinTime;
-//	}
-	
-	public boolean isBusyRead() {
-		return isBusyRead;
-	}
-	public void setBusyread(boolean isbusyread) {
-		this.isBusyRead = isbusyread;
-	}
-	public boolean isBusywrite() {
-		return isBusyWrite;
-	}
-	public void setBusywrite(boolean isbusywrite) {
-		this.isBusyWrite = isbusywrite;
-	}
+
 	public boolean isAbortingConnection() {
 		return abortingConnection;
 	}
@@ -502,7 +391,123 @@ public class Session {
 	public SelectionKey getSelectionKey() {
 		return selectionkey;
 	}
-	void setSelectionKey(SelectionKey selectionkey) {
+	public void setSelectionKey(SelectionKey selectionkey) {
 		this.selectionkey = selectionkey;
+	}
+
+	public void cancelKey() {
+		synchronized (this.selectionkey) {
+			if (!this.selectionkey.isValid()) return;
+			this.selectionkey.cancel();
+		}
+	}
+
+	public void subscribeKey(int OP) {
+		synchronized (this.selectionkey) {
+			if (!this.selectionkey.isValid()) return;
+			this.selectionkey.interestOps(this.selectionkey.interestOps() | OP);
+		}
+	}
+
+	public void unsubscribeKey(int OP) {
+		synchronized (this.selectionkey) {
+			if (!this.selectionkey.isValid()) return;
+			this.selectionkey.interestOps(this.selectionkey.interestOps() & ~OP);
+		}
+	}
+
+	public void closeSession() {
+		this.sessionCloser.closeSession(this);
+	}
+
+	public String getSessionKey() {
+		return Session.getSessionKey(this.destIp, this.destPort, this.sourceIp, this.sourcePort);
+	}
+
+	public static String getSessionKey(int destIp, int destPort, int sourceIp, int sourcePort) {
+		return PacketUtil.intToIPAddress(sourceIp) + ":" + sourcePort + "-" +
+				PacketUtil.intToIPAddress(destIp) + ":" + destPort;
+	}
+
+	public int getBytesReceived() {
+		return bytesReceived;
+	}
+
+	public void addBytesAndIncrementPacketsReceived(int bytesReceived) {
+		Log.e(TAG, "addBytesReceived: before: " + this.bytesReceived + " after: " + (Integer.sum(this.bytesReceived, bytesReceived))  );
+
+		this.bytesReceived += bytesReceived;
+		addPacketsReceived();
+	}
+
+	public int getBytesSent() {
+		return bytesSent;
+	}
+
+	//bytes sent from client to vpnServer
+	public void addBytesSent(int bytesSent) {
+		Log.e(TAG, "addBytesSent: before: " + this.bytesSent + " after: " + (Integer.sum(this.bytesSent, bytesSent))  );
+		this.bytesSent += bytesSent;
+	}
+
+	public int getPacketsReceived() {
+		return packetsReceived;
+	}
+
+	public void addPacketsReceived() {
+		Log.e(TAG, "addPacketsReceived: before incr " + this.packetsReceived );
+
+		this.packetsReceived++;
+	}
+
+	public int getPacketsSent() {
+		return packetsSent;
+	}
+
+	public void addPacketsSent() {
+		Log.e(TAG, "addPacketsSent: before incr " + this.packetsSent );
+		this.packetsSent++;
+	}
+
+	@Override
+	public String toString() {
+		return "Session{" +
+				"TAG='" + TAG + '\'' +
+				", FROM->TO= " + PacketUtil.intToIPAddress(sourceIp)+":"+ sourcePort + " -> "+ PacketUtil.intToIPAddress(destIp) +":"+ destPort +
+				", channel=" + channel +
+				", destIp=" + destIp +
+				", destPort=" + destPort +
+				", sourceIp=" + sourceIp +
+				", sourcePort=" + sourcePort +
+				", appUid=" + appUid +
+				", recSequence=" + recSequence +
+				", sendUnack=" + sendUnack +
+				", isacked=" + isacked +
+				", sendNext=" + sendNext +
+				", sendWindow=" + sendWindow +
+				", sendWindowSize=" + sendWindowSize +
+				", sendWindowScale=" + sendWindowScale +
+				", sendAmountSinceLastAck=" + sendAmountSinceLastAck +
+				", maxSegmentSize=" + maxSegmentSize +
+				", isConnected=" + isConnected +
+				", receivingStream Size=" + receivingStream.size() +
+				", sendingStream=" + sendingStream +
+				", hasReceivedLastSegment=" + hasReceivedLastSegment +
+				", lastIpHeader=" + lastIpHeader +
+				", lastTcpHeader=" + lastTcpHeader +
+				", lastUdpHeader=" + lastUdpHeader +
+				", closingConnection=" + closingConnection +
+				", isDataForSendingReady=" + isDataForSendingReady +
+				", unackData Length=" + Arrays.toString(unackData).length() +
+				", packetCorrupted=" + packetCorrupted +
+				", resendPacketCounter=" + resendPacketCounter +
+				", timestampSender=" + timestampSender +
+				", timestampReplyto=" + timestampReplyto +
+				", ackedToFin=" + ackedToFin +
+				", abortingConnection=" + abortingConnection +
+				", selectionkey=" + selectionkey +
+				", connectionStartTime=" + connectionStartTime +
+				", sessionCloser=" + sessionCloser +
+				'}';
 	}
 }

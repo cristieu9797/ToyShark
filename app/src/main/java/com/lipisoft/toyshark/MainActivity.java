@@ -87,9 +87,9 @@ public class MainActivity extends AppCompatActivity implements AppsLoadListener 
 
 		// create a deep copy I believe of an empty list, seems useless
 
-		final ConnectionListAdapter adapterConnections = new ConnectionListAdapter(SessionManager.INSTANCE.getList());
-		SessionManager.INSTANCE.setAdapter(adapterConnections);
-		recyclerViewConnections.setAdapter(adapterConnections);
+//		final ConnectionListAdapter adapterConnections = new ConnectionListAdapter(SessionManager.INSTANCE.getList());
+//		SessionManager.INSTANCE.setAdapter(adapterConnections);
+//		recyclerViewConnections.setAdapter(adapterConnections);
 
 		btnStartVpn.setOnClickListener(new View.OnClickListener() {
 			@Override
@@ -248,10 +248,11 @@ public class MainActivity extends AppCompatActivity implements AppsLoadListener 
 	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
 		Log.i(TAG, "onActivityResult(resultCode:  " + resultCode + ")");
 		if (resultCode == RESULT_OK) {
-			Intent captureVpnServiceIntent = new Intent(getApplicationContext(), ToySharkVPNService.class);
+			Intent captureVpnServiceIntent = new Intent(getApplicationContext(), VpnServiceClass.class);
 //			captureVpnServiceIntent.putExtra("TRACE_DIR", Environment.getExternalStorageDirectory().getPath() + "/ToyShark");
 			captureVpnServiceIntent.putExtra("TRACE_DIR", Environment
 					.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) + "/ToyShark");
+			captureVpnServiceIntent.setAction("tech.httptoolkit.android.START_VPN_ACTION");
 			startService(captureVpnServiceIntent);
 		} else if (resultCode == RESULT_CANCELED) {
 			showVPNRefusedDialog();

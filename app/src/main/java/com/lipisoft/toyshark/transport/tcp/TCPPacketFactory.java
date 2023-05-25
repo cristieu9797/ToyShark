@@ -402,7 +402,7 @@ public class TCPPacketFactory {
 	 * @param header instance of TCPHeader
 	 * @return array of byte
 	 */
-	private static byte[] createTCPHeaderData(TCPHeader header){
+	public static byte[] createTCPHeaderData(TCPHeader header){
 		final byte[] buffer = new byte[header.getTCPHeaderLength()];
 		buffer[0] = (byte)(header.getSourcePort() >> 8);
 		buffer[1] = (byte)(header.getSourcePort());

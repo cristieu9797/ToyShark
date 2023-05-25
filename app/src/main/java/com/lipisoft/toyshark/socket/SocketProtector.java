@@ -50,13 +50,11 @@ public class SocketProtector {
 			this.protector = protector;
 		}
 	}
+
 	public void protect(Socket socket){
-		protector.protectSocket(socket);
-	}
-	public void protect(int socket){
-		protector.protectSocket(socket);
+		protector.protect(socket);
 	}
 	public void protect(DatagramSocket socket){
-		protector.protectSocket(socket);
+		protector.protect(socket);
 	}
 }

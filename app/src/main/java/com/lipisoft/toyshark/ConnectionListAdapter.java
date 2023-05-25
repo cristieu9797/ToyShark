@@ -53,7 +53,7 @@ public class ConnectionListAdapter extends RecyclerView.Adapter<ConnectionViewHo
             protocol.setText(String.valueOf(session.getLastIpHeader().getProtocol())); // all sessions seem to be TCP
             address.setText(PacketUtil.intToIPAddress(session.getDestIp()));
             port.setText(String.format(Locale.getDefault(), "%d", session.getDestPort()));
-            packageName.setText("" + session.getUid());
+            packageName.setText("" + session.getAppUid());
         }
     }
 

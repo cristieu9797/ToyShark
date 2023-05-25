@@ -19,12 +19,11 @@ package com.lipisoft.toyshark;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
-import android.os.Handler;
-import android.os.Looper;
-import android.os.Message;
 import android.util.Log;
+import android.util.SparseArray;
 
 import com.lipisoft.toyshark.socket.DataConst;
+import com.lipisoft.toyshark.socket.ICloseSession;
 import com.lipisoft.toyshark.socket.SocketNIODataService;
 import com.lipisoft.toyshark.socket.SocketProtector;
 import com.lipisoft.toyshark.util.PacketUtil;
@@ -36,13 +35,8 @@ import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.DatagramChannel;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 import java.nio.channels.spi.AbstractSelectableChannel;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -51,66 +45,16 @@ import java.util.concurrent.ConcurrentHashMap;
  * @author Borey Sao
  * Date: May 20, 2014
  */
-public enum SessionManager {
-	INSTANCE;
-	public static final int SESSION = 1;
+public class SessionManager implements ICloseSession {
+
 	private final String TAG = "SessionManager";
-	private final Map<String, Session> table = new ConcurrentHashMap<>();
-	private final List<Session> sessionList = new ArrayList<>();
+	public final Map<String, Session> table = new ConcurrentHashMap<>();
 	private SocketProtector protector = SocketProtector.getInstance();
-	private Selector selector;
-	private ConnectionListAdapter adapter;
 
-	SessionManager() {
-		try {
-			selector = Selector.open();
-		} catch (IOException e) {
-			Log.e(TAG,"Failed to create Socket Selector");
-		}
-	}
-	private final Handler handler = new Handler(Looper.getMainLooper()) {
-		@Override
-		public void handleMessage(Message msg) {
-			Log.i(TAG, "New message to update session adapter");
-			if (msg != null) {
-				if (msg.what == SessionManager.SESSION) {
-					adapter.notifyDataSetChanged();
-				}
-			}
-			super.handleMessage(msg);
-		}
-	};
-	public Selector getSelector(){
-		return selector;
-	}
+	private SocketNIODataService nioService;
 
-	public Map<String, Session> getTable() { return table; }
-	public boolean add(@NonNull final Session session) {
-		// should check here for duplicates or ensure that sessions are also removed
-		// todo
-		// weird that session does not differentiate between TCP and UDP
-		// note that we only check for destination as there can be multiple processes
-		// which can access the same server, so that is why we do not check
-		// for equality between session and identical on the source port and IP
-		for (Session identical: sessionList) {
-			if (session.getDestIp() == identical.getDestIp() &&
-					session.getDestPort() == identical.getDestPort()) {
-				return true;
-			}
-		}
-		return sessionList.add(session);
-	}
-
-	@NonNull public List<Session> getList() {
-		return sessionList;
-	}
-
-	public void setAdapter(@NonNull ConnectionListAdapter adapter) {
-		this.adapter = adapter;
-	}
-
-	@NonNull public Handler getHandler() {
-		return handler;
+	public SessionManager(SocketNIODataService nioService) {
+		this.nioService = nioService;
 	}
 
 	/**
@@ -119,7 +63,7 @@ public enum SessionManager {
 	 */
 	public void keepSessionAlive(Session session) {
 		if(session != null){
-			String key = createKey(session.getDestIp(), session.getDestPort(),
+			String key = Session.getSessionKey(session.getDestIp(), session.getDestPort(),
 					session.getSourceIp(), session.getSourcePort());
 			table.put(key, session);
 		}
@@ -138,7 +82,7 @@ public enum SessionManager {
 	}
 
 	public Session getSession(int ip, int port, int srcIp, int srcPort) {
-		String key = createKey(ip, port, srcIp, srcPort);
+		String key = Session.getSessionKey(ip, port, srcIp, srcPort);
 
 		return getSessionByKey(key);
 	}
@@ -152,31 +96,6 @@ public enum SessionManager {
 		return null;
 	}
 
-	public Session getSessionByChannel(AbstractSelectableChannel channel) {
-		Collection<Session> sessions = table.values();
-
-		for (Session session: sessions) {
-			if (channel == session.getChannel()) {
-				return session;
-			}
-		}
-
-		return null;
-	}
-
-//	public void removeSessionByChannel(SocketChannel channel){
-//		synchronized (syncTable) {
-//			Set<String> keys = table.keySet();
-//			for (String key: keys) {
-//				Session session = table.get(key);
-//				if(session != null && session.getSocketChannel() == channel) {
-//					table.remove(key);
-//					Log.d(TAG, "closed session -> " + key);
-//				}
-//			}
-//		}
-//	}
-
 	/**
 	 * remove session from memory, then close socket connection.
 	 * @param ip Destination IP Address
@@ -185,7 +104,7 @@ public enum SessionManager {
 	 * @param srcPort Source Port
 	 */
 	public void closeSession(int ip, int port, int srcIp, int srcPort){
-		String key = createKey(ip, port, srcIp, srcPort);
+		String key = Session.getSessionKey(ip, port, srcIp, srcPort);
 		Session session = table.remove(key);
 
 		if(session != null){
@@ -202,44 +121,33 @@ public enum SessionManager {
 	}
 
 	public void closeSession(@NonNull Session session){
-		String key = createKey(session.getDestIp(),
+		closeSession(session.getDestIp(),
 				session.getDestPort(), session.getSourceIp(),
 				session.getSourcePort());
-		table.remove(key);
-
-		try {
-			AbstractSelectableChannel channel = session.getChannel();
-			if(channel != null) {
-				channel.close();
-			}
-		} catch (IOException e) {
-			Log.e(TAG, e.toString());
-		}
-		Log.d(TAG,"closed session -> " + key);
 	}
 
 	@Nullable
-	public Session createNewUDPSession(int ip, int port, int srcIp, int srcPort, int uid){
-		String keys = createKey(ip, port, srcIp, srcPort);
+	public Session createNewUDPSession(int ip, int port, int srcIp, int srcPort) {
+		String keys = Session.getSessionKey(ip, port, srcIp, srcPort);
 
 		if (table.containsKey(keys))
 			return table.get(keys);
 
-		Session session = new Session(srcIp, srcPort, ip, port, uid);
-		SessionManager.INSTANCE.add(session);
-		SessionManager.INSTANCE.getHandler().obtainMessage(SessionManager.SESSION).sendToTarget();
+		Session session = new Session(srcIp, srcPort, ip, port, this);
+
 		DatagramChannel channel;
 
 		try {
 			channel = DatagramChannel.open();
 			channel.socket().setSoTimeout(0);
 			channel.configureBlocking(false);
-
 		} catch (IOException e) {
 			e.printStackTrace();
 			return null;
 		}
 		protector.protect(channel.socket());
+
+		session.setChannel(channel);
 
 		//initiate connection to reduce latency
 		String ips = PacketUtil.intToIPAddress(ip);
@@ -257,28 +165,12 @@ public enum SessionManager {
 		}
 
 		try {
-			synchronized(SocketNIODataService.syncSelector2) {
-				selector.wakeup();
-				synchronized(SocketNIODataService.syncSelector) {
-					SelectionKey selectionKey;
-					if (channel.isConnected()) {
-						selectionKey = channel.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE);
-					} else {
-						selectionKey = channel.register(selector, SelectionKey.OP_CONNECT
-								| SelectionKey.OP_READ | SelectionKey.OP_WRITE
-						);
-					}
-					session.setSelectionKey(selectionKey);
-					Log.d(TAG,"Registered udp selector successfully");
-				}
-			}
+			nioService.registerSession(session);
 		} catch (ClosedChannelException e) {
 			e.printStackTrace();
 			Log.e(TAG,"failed to register udp channel with selector: "+ e.getMessage());
 			return null;
 		}
-
-		session.setChannel(channel);
 
 		if (table.containsKey(keys)) {
 			try {
@@ -290,21 +182,20 @@ public enum SessionManager {
 		} else {
 			table.put(keys, session);
 		}
+
 		Log.d(TAG,"new UDP session successfully created.");
 		return session;
 	}
 
 	@Nullable
-	public Session createNewSession(int ip, int port, int srcIp, int srcPort, int uid){
-		String key = createKey(ip, port, srcIp, srcPort);
+	public Session createNewTCPSession(int ip, int port, int srcIp, int srcPort){
+		String key = Session.getSessionKey(ip, port, srcIp, srcPort);
 		if (table.containsKey(key)) {
-			Log.e(TAG, "Session was already created.");
+			Log.e(TAG, "Session " + key + " was already created.");
 			return null;
 		}
 
-		Session session = new Session(srcIp, srcPort, ip, port, uid);
-		SessionManager.INSTANCE.add(session);
-		SessionManager.INSTANCE.getHandler().obtainMessage(SessionManager.SESSION).sendToTarget();
+		Session session = new Session(srcIp, srcPort, ip, port, this);
 
 		SocketChannel channel;
 		try {
@@ -314,7 +205,7 @@ public enum SessionManager {
 			channel.socket().setSoTimeout(0);
 			channel.socket().setReceiveBufferSize(DataConst.MAX_RECEIVE_BUFFER_SIZE);
 			channel.configureBlocking(false);
-		}catch(SocketException e){
+		} catch(SocketException e) {
 			Log.e(TAG, e.toString());
 			return null;
 		} catch (IOException e) {
@@ -325,12 +216,18 @@ public enum SessionManager {
 		Log.d(TAG,"created new SocketChannel for " + key);
 
 		protector.protect(channel.socket());
-
 		Log.d(TAG,"Protected new SocketChannel");
 
+		session.setChannel(channel);
+
 		//initiate connection to reduce latency
-		SocketAddress socketAddress = new InetSocketAddress(ips, port);
-		Log.d(TAG,"initiate connecting to remote tcp server: " + ips + ":" + port);
+		// Use the real address, unless tcpPortRedirection defines a different
+		// target address for traffic on this port.
+		SocketAddress socketAddress = tcpPortRedirection.get(port) != null
+				? tcpPortRedirection.get(port)
+				: new InetSocketAddress(ips, port);
+
+		Log.d(TAG,"initiate connecting to remote tcp server: " + socketAddress.toString());
 		boolean connected;
 		try{
 			connected = channel.connect(socketAddress);
@@ -341,34 +238,13 @@ public enum SessionManager {
 
 		session.setConnected(connected);
 
-		//register for non-blocking operation
 		try {
-			synchronized(SocketNIODataService.syncSelector2){
-				selector.wakeup();
-				synchronized(SocketNIODataService.syncSelector){
-					SelectionKey selectionKey = channel.register(selector,
-							SelectionKey.OP_CONNECT
-									| SelectionKey.OP_READ | SelectionKey.OP_WRITE
-					);
-//					SelectionKey selectionKey;
-//					if (channel.isConnected()) {
-//						selectionKey = channel.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE);
-//					} else {
-//						selectionKey = channel.register(selector, SelectionKey.OP_CONNECT
-////								| SelectionKey.OP_READ | SelectionKey.OP_WRITE
-//						);
-//					}
-					session.setSelectionKey(selectionKey);
-					Log.d(TAG,"Registered tcp selector successfully");
-				}
-			}
+			nioService.registerSession(session);
 		} catch (ClosedChannelException e) {
 			e.printStackTrace();
-			Log.e(TAG,"failed to register tcp channel with selector: " + e.getMessage());
+			Log.e(TAG,"Failed to register channel with selector: " + e.getMessage());
 			return null;
 		}
-
-		session.setChannel(channel);
 
 		if (table.containsKey(key)) {
 			try {
@@ -382,16 +258,10 @@ public enum SessionManager {
 		}
 		return session;
 	}
-	/**
-	 * create session key based on destination ip+port and source ip+port
-	 * @param ip Destination IP Address
-	 * @param port Destination Port
-	 * @param srcIp Source IP Address
-	 * @param srcPort Source Port
-	 * @return String
-	 */
-	public String createKey(int ip, int port, int srcIp, int srcPort){
-		return PacketUtil.intToIPAddress(srcIp) + ":" + srcPort + "-" +
-				PacketUtil.intToIPAddress(ip) + ":" + port;
+
+	private SparseArray<InetSocketAddress> tcpPortRedirection = new SparseArray<>();
+
+	public void setTcpPortRedirections(SparseArray<InetSocketAddress> tcpPortRedirection) {
+		this.tcpPortRedirection = tcpPortRedirection;
 	}
 }
